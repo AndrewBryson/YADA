@@ -2,16 +2,9 @@
   "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
   "parameters": {
-    "location": {
-      "type": "string",
-      "defaultValue": "eastus",
-      "metadata": {
-        "description": "Location"
-      }
-    },
     "sqlServerName": {
       "type": "string",
-      "defaultValue": "[concat('aca-yada-sqlsvr', uniqueString(resourceGroup().id))]",
+      "defaultValue": "[concat('aca-yada-sqlsvr-', uniqueString(resourceGroup().id))]",
       "metadata": {
         "description": "YADA SQL Server"
       }
@@ -60,7 +53,7 @@
     {
       "type": "Microsoft.Sql/servers",
       "apiVersion": "2021-02-01-preview",
-      "location": "[parameters('location')]",
+      "location": "[resourceGroup().location]",
       "name": "[parameters('sqlServerName')]",
       "properties": {
         "administratorLogin": "[parameters('sqlUsername')]",
@@ -70,7 +63,7 @@
     {
       "type": "Microsoft.Sql/servers/databases",
       "apiVersion": "2021-02-01-preview",
-      "location": "[parameters('location')]",
+      "location": "[resourceGroup().location]",
       "name": "[concat(parameters('sqlServerName'), '/', parameters('sqlDbName'))]",
       "properties": {
         "collation": "SQL_Latin1_General_CP1_CI_AS",
@@ -83,7 +76,7 @@
     {
       "type": "Microsoft.App/managedEnvironments",
       "apiVersion": "2023-05-01",
-      "location": "[parameters('location')]",
+      "location": "[resourceGroup().location]",
       "name": "[variables('environmentName')]",
       "properties": {
         "appLogsConfiguration": {
@@ -98,7 +91,7 @@
     {
       "type": "Microsoft.App/containerApps",
       "apiVersion": "2023-05-01",
-      "location": "[parameters('location')]",
+      "location": "[resourceGroup().location]",
       "name": "api",
       "properties": {
         "environmentId": "[resourceId('Microsoft.App/containerApps/environments', variables('environmentName'))]",
@@ -149,7 +142,7 @@
     {
       "type": "Microsoft.App/containerApps",
       "apiVersion": "2023-05-01",
-      "location": "[parameters('location')]",
+      "location": "[resourceGroup().location]",
       "name": "web",
       "properties": {
         "environmentId": "[resourceId('Microsoft.App/containerApps/environments', variables('environmentName'))]",
