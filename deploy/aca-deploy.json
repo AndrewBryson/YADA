@@ -1,0 +1,218 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "type": "string",
+      "defaultValue": "eastus",
+      "metadata": {
+        "description": "Location"
+      }
+    },
+    "sqlServerName": {
+      "type": "string",
+      "defaultValue": "[concat('aca-yada-sqlsvr', uniqueString(resourceGroup().id))]",
+      "metadata": {
+        "description": "YADA SQL Server"
+      }
+    },
+    "sqlDbName": {
+      "type": "string",
+      "defaultValue": "aca-yada",
+      "metadata": {
+        "description": "YADA SQL Database"
+      }
+    },
+    "sqlUsername": {
+      "type": "string",
+      "defaultValue": "azure",
+      "metadata": {
+        "description": "SQL Server Username"
+      }
+    },
+    "sqlPassword": {
+      "type": "securestring",
+      "metadata": {
+        "description": "SQL Server Password"
+      }
+    }
+  },
+  "variables": {
+    // "sqlServerFqdn": "[reference(resourceId('Microsoft.Sql/servers', parameters('sqlServerName'))).fullyQualifiedDomainName]",
+    "apiImage": "erjosito/yadaapi:1.0",
+    "webImage": "erjosito/yadaweb:1.0",
+    "apiPort": 8080,
+    "webPort": 80,
+    "environmentName": "yada"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces",
+      "apiVersion": "2020-08-01",
+      "name": "aca-yada-law",
+      "location": "[resourceGroup().location]",
+      "properties": {
+        "sku": {
+          "name": "PerGB2018"
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Sql/servers",
+      "apiVersion": "2021-02-01-preview",
+      "location": "[parameters('location')]",
+      "name": "[parameters('sqlServerName')]",
+      "properties": {
+        "administratorLogin": "[parameters('sqlUsername')]",
+        "administratorLoginPassword": "[parameters('sqlPassword')]"
+      }
+    },
+    {
+      "type": "Microsoft.Sql/servers/databases",
+      "apiVersion": "2021-02-01-preview",
+      "location": "[parameters('location')]",
+      "name": "[concat(parameters('sqlServerName'), '/', parameters('sqlDbName'))]",
+      "properties": {
+        "collation": "SQL_Latin1_General_CP1_CI_AS",
+        "sampleName": "AdventureWorksLT"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Sql/servers', parameters('sqlServerName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.App/managedEnvironments",
+      "apiVersion": "2023-05-01",
+      "location": "[parameters('location')]",
+      "name": "[variables('environmentName')]",
+      "properties": {
+        "appLogsConfiguration": {
+          "destination": "log-analytics",
+          "logAnalyticsConfiguration": {
+            "customerId": "[reference(resourceId('Microsoft.OperationalInsights/workspaces', 'aca-yada-law')).customerId]",
+            "sharedKey": "[listKeys(resourceId('Microsoft.OperationalInsights/workspaces', 'aca-yada-law'), '2020-08-01').primarySharedKey]"
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.App/containerApps",
+      "apiVersion": "2023-05-01",
+      "location": "[parameters('location')]",
+      "name": "api",
+      "properties": {
+        "environmentId": "[resourceId('Microsoft.App/containerApps/environments', variables('environmentName'))]",
+        "configuration": {
+          "ingress": {
+            "external": true,
+            "targetPort": "[variables('apiPort')]"
+          },
+          "secrets": [
+            {
+              "name": "sqlserverpassword",
+              "value": "[parameters('sqlPassword')]"
+            }
+          ],
+          "env": [
+            {
+              "name": "SQL_SERVER_USERNAME",
+              "value": "[parameters('sqlUsername')]"
+            },
+            {
+              "name": "SQL_SERVER_PASSWORD",
+              "value": "secretref:sqlserverpassword"
+            },
+            {
+              "name": "SQL_SERVER_FQDN",
+              "value": "[reference(resourceId('Microsoft.Sql/servers', parameters('sqlServerName'))).fullyQualifiedDomainName]"
+            }
+          ]
+        },
+        "template": {
+          "containers": [
+            {
+              "name": "api",
+              "image": "[variables('apiImage')]",
+              "resources": {
+                "cpu": 0.5,
+                "memory": "1.0Gi"
+              }
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.App/containerApps/environments', variables('environmentName'))]",
+        "[resourceId('Microsoft.Sql/servers/databases', parameters('sqlServerName'), parameters('sqlDbName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.App/containerApps",
+      "apiVersion": "2023-05-01",
+      "location": "[parameters('location')]",
+      "name": "web",
+      "properties": {
+        "environmentId": "[resourceId('Microsoft.App/containerApps/environments', variables('environmentName'))]",
+        "configuration": {
+          "ingress": {
+            "external": true,
+            "targetPort": "[variables('webPort')]"
+          },
+          "env": [
+            {
+              "name": "API_URL",
+              "value": "[concat('https://', reference(resourceId('Microsoft.App/containerApps', 'api')).properties.configuration.ingress.fqdn)]"
+            },
+            {
+              "name": "BACKGROUND",
+              "value": "#aaf1f2"
+            },
+            {
+              "name": "BRANDING",
+              "value": "whatthehack"
+            }
+          ]
+        },
+        "template": {
+          "containers": [
+            {
+              "name": "web",
+              "image": "[variables('webImage')]",
+              "resources": {
+                "cpu": 0.5,
+                "memory": "1.0Gi"
+              }
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.App/containerApps/environments', variables('environmentName'))]",
+        "[resourceId('Microsoft.App/containerApps', 'api')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Sql/servers/firewallRules",
+      "apiVersion": "2021-02-01-preview",
+      "name": "[concat(parameters('sqlServerName'), '/yadaapi')]",
+      "properties": {
+        "startIpAddress": "[reference(resourceId('Microsoft.App/containerApps', 'api')).properties.outboundIpAddresses[0]]",
+        "endIpAddress": "[reference(resourceId('Microsoft.App/containerApps', 'api')).properties.outboundIpAddresses[0]]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Sql/servers', parameters('sqlServerName'))]",
+        "[resourceId('Microsoft.App/containerApps', 'api')]"
+      ]
+    }
+  ],
+  "outputs": {
+    "webFqdn": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.App/containerApps', 'web')).properties.configuration.ingress.fqdn]"
+    },
+    "apiFqdn": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.App/containerApps', 'api')).properties.configuration.ingress.fqdn]"
+    }
+  }
+}
